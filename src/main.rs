@@ -1,3 +1,27 @@
+#![warn(missing_docs)]
+//! A simple crate to support a PIR sensor on raspberry pi and publish over MQTT with Home Assistant discovery support
+//!
+//! The following environment variables are used and should be stored in an “.env” file:
+//!
+//! * mqtt_server = Defualt is 'mqtt://localhost'
+//! * mqtt_port = Default is '1883'
+//! * mqtt_username = Default is 'iot'
+//! * mqtt_password = Default is 'password'
+//! * motion_topic = Constructed from the device name
+//! * motion_topic = Constructed from the device name
+//! * motion_topic = Constructed from the device name
+//! * mqtt_persistence_file = Default is '/tmp/mqtt_persistence_file'
+//! * mqtt_client_id = Required, no default
+//!
+//! To be implemented
+//!
+//! * MQTT_LOGGING
+//! * XSCREENSAVER_SUPPORT
+//!
+//!
+//!
+//! [`PIR sensor`]: https://michaelregan.github.io/posts/motion-sensor-for-pi/
+//! 
 #[macro_use]
 extern crate log;
 mod config;
@@ -22,20 +46,28 @@ async fn main() {
     info!("starting up");
 
     let config = Config::new();
-
+    
+    if false {
+        process::exit(1);
+    }
+    
     // Create a client & define connect options
     info!("Connecting to MQTT server: {}", config.mqtt_server);
     let _host = env::args()
         .nth(1)
         .unwrap_or_else(|| config.mqtt_server.to_string());
 
-    let mut cli = mqtt::Client::new(config.mqtt_server).unwrap_or_else(|e| {
+    let create_opts = mqtt::CreateOptionsBuilder::new()
+        .server_uri(config.mqtt_server)
+        .client_id(config.mqtt_client_id)
+        .persistence("persist")
+        //.persistence(mqtt::PersistenceType::File)
+        .finalize();
+
+    let cli = mqtt::AsyncClient::new(create_opts).unwrap_or_else(|e| {
         println!("Error creating the client: {:?}", e);
         process::exit(1);
     });
-    
-    // Use 5sec timeouts for sync calls.
-    cli.set_timeout(Duration::from_secs(5));
 
     let conn_opts = mqtt::ConnectOptionsBuilder::new()
         .keep_alive_interval(Duration::from_secs(20))
@@ -44,10 +76,11 @@ async fn main() {
         .clean_session(true)
         .finalize();
 
-    // Connect and wait for it to complete or fail.
-    // The default connection uses MQTT v3.x
-    if let Err(e) = cli.connect(conn_opts) {
-        println!("Unable to connect: {:?}", e);
+    // Start an async operation and get the token for it.
+    //let tok = cli.connect(conn_opts);
+        // Connect and wait for it to complete or fail
+    if let Err(err) = cli.connect(conn_opts).wait() {
+        println!("Unable to connect: {}", err);
         process::exit(1);
     }
 
@@ -59,9 +92,23 @@ async fn main() {
         .retained(true)
         .finalize();
 
+    // From PAHO example:
+    // Note that with MQTT v5, this would be a good place to use a topic
+    // object with an alias. It might help reduce the size of the messages
+    // if the topic string is long.
+
     // Publish configuration to the broker
-    if let Err(e) = cli.publish(msg) {
-        println!("Unable to publish: {:?}", e);
+    // if let Err(e) = cli.publish(msg) {
+    //     println!("Unable to publish: {:?}", e);
+    // }
+
+    match cli.try_publish(msg) {
+        Err(err) => eprintln!("Error creating/queuing the message to MQTT: {}", err),
+        Ok(tok) => {
+            if let Err(err) = tok.wait() {
+                eprintln!("Error sending message: {}", err);
+            }
+        }
     }
     
     info!("setup PIR sensor: ");
@@ -125,10 +172,11 @@ async fn main() {
             
     
                 // Publish it to the broker
-                if let Err(e) = cli.publish(Message::new(&config.motion_topc, "ON", 0)) {
-                    error!("Unable to publish: {:?}", e);
+                //let tok = cli.publish(Message::new(&config.motion_topic, "ON", 0)).wait();
+                if let Err(err) = cli.publish(Message::new(&config.motion_topic, "ON", 0)).await {
+                    eprintln!("Error publishing message: {}", err);
                 }
-                
+                    
                 // Shell command
                 let hello = Command::new("sh")
                 .arg("-c")
@@ -150,10 +198,11 @@ async fn main() {
             
             motion_state = false;
             // Publish it to the broker
-            if let Err(e) = cli.publish(Message::new(&config.motion_topc, "OFF", 0)) {
-                error!("Unable to publish: {:?}", e);
+            if let Err(err) = cli.publish(Message::new(&config.motion_topic, "OFF", 0)).await {
+                eprintln!("Error publishing message: {}", err);
             }
         }
-        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
