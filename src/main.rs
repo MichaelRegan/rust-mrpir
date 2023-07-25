@@ -27,10 +27,8 @@ extern crate log;
 mod config;
 use config::Config;
 use mqtt::{Message, MessageBuilder};
-//use mqtt::{MessageBuilder, topic};
 use pir_motion_sensor::sensor::helpers::spawn_detection_threads;
 use pir_motion_sensor::sensor::motion::MotionSensor;
-//use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -128,9 +126,9 @@ async fn main() {
         // Bedroom
         MotionSensor::new(
             String::from("pir_Sensor"), // name
-            17,                                 // gpio PIN number
+            config.pir_pin,                    // gpio PIN number
             200,                               // sensor refresh rate in miliseconds
-            1000,                               // sensor motion time period in miliseconds
+            1000,                              // sensor motion time period in miliseconds
             5,                                 // sensor minimal triggering number
             detections_channel_sender.clone(), // channel where sensor thread will be sending detections
             None, // None for real GPIO usage, Some(Vec<u64>) for unit tests, please check tests/* */

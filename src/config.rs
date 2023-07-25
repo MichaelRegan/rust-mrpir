@@ -46,6 +46,8 @@ pub struct Config {
     
     /// The required device name from the environment, or panic if it's not set
     pub mqtt_client_id: String,
+
+    pub pir_pin: u8,
 }
 
 // Implementation of the Config struct
@@ -123,6 +125,14 @@ impl Config {
         // Construct the MQTT topic for the motion sensor state
         let motion_topic = format!("homeassistant/binary_sensor/{device_name}/state");
 
+        let pir_pin: u8 = match env::var("PIR_PIN") {
+            Ok(val) => val.parse().unwrap(),
+            Err(e) => {
+                error!("PIR_PIN not set, please set it as an environment variable for the PIR device:");
+                panic!("Please set PIR_PIN as an environment variable for the PIR device: {}", e)
+            }
+        };
+
         // Log the configuration
         info!("Using MQTT Server: {mqtt_server}");
         info!("Using MQTT Port: {mqtt_port}");
@@ -143,6 +153,7 @@ impl Config {
             mqtt_password,
             mqtt_persistence_file,
             mqtt_client_id,
+            pir_pin,
         }
     }
 }
@@ -160,6 +171,7 @@ impl Clone for Config {
             mqtt_password: self.mqtt_password.clone(),
             mqtt_persistence_file: self.mqtt_persistence_file.clone(),
             mqtt_client_id: self.mqtt_client_id.clone(),
+            pir_pin: self.pir_pin.clone(),
         }
     }
 }
