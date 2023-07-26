@@ -45,10 +45,6 @@ async fn main() {
 
     let config = Config::new();
     
-    if false {
-        process::exit(1);
-    }
-    
     // Create a client & define connect options
     info!("Connecting to MQTT server: {}", config.mqtt_server);
     let _host = env::args()
@@ -74,9 +70,7 @@ async fn main() {
         .clean_session(true)
         .finalize();
 
-    // Start an async operation and get the token for it.
-    //let tok = cli.connect(conn_opts);
-        // Connect and wait for it to complete or fail
+    // Connect and wait for it to complete or fail
     if let Err(err) = cli.connect(conn_opts).wait() {
         println!("Unable to connect: {}", err);
         process::exit(1);
@@ -94,11 +88,6 @@ async fn main() {
     // Note that with MQTT v5, this would be a good place to use a topic
     // object with an alias. It might help reduce the size of the messages
     // if the topic string is long.
-
-    // Publish configuration to the broker
-    // if let Err(e) = cli.publish(msg) {
-    //     println!("Unable to publish: {:?}", e);
-    // }
 
     match cli.try_publish(msg) {
         Err(err) => eprintln!("Error creating/queuing the message to MQTT: {}", err),
@@ -120,12 +109,12 @@ async fn main() {
 
     //
     // sensors initialization - check README for more details about sensor parameters
-    // in this example we initialize 4 motion sensors
+    // in this example we initialize 1 motion sensors
     //
     let sensors_list = vec![
         // Bedroom
         MotionSensor::new(
-            String::from("pir_Sensor"), // name
+            String::from(config.device_name), // name
             config.pir_pin,                    // gpio PIN number
             200,                               // sensor refresh rate in miliseconds
             1000,                              // sensor motion time period in miliseconds
@@ -161,8 +150,8 @@ async fn main() {
             // each "valid" detection contains the sensor name and time of detection as SystemTime
           
             let (detection_name, detection_time) = detection_message;
-            if detection_time.duration_since(last_detection).unwrap().as_secs() > 1 {
-                info!("detection happened, sensor: {detection_name}, time: {detection_time:?} ");
+            if detection_time.duration_since(last_detection).unwrap().as_secs() > 5 && motion_state == false {
+                //info!("detection happened, sensor: {detection_name}, time: {detection_time:?} ");
                 motion_state = true;
 
                 // Reset last detection time

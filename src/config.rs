@@ -20,6 +20,10 @@ use std::env;
 
 /// Gets environment variables and constructs required configuration attributes
 pub struct Config {
+
+    /// The required device name from the environment
+    pub device_name: String,
+
     /// The MQTT server address from the environment, or use the default
     pub mqtt_server: String,
     
@@ -47,6 +51,7 @@ pub struct Config {
     /// The required device name from the environment, or panic if it's not set
     pub mqtt_client_id: String,
 
+    /// The required pin used for the PIR sensor
     pub pir_pin: u8,
 }
 
@@ -57,6 +62,7 @@ impl Config {
     /// Required environment variables:
     /// * mqtt_client_id
     /// * device_name
+    /// * pir_pin
     /// 
     /// Optional environment variables:
     /// * mqtt_server [default: 'mqtt://localhost']
@@ -144,6 +150,7 @@ impl Config {
 
         // Return the configuration
         Self {
+            device_name,
             mqtt_server,
             mqtt_port,
             config_payload,
@@ -172,6 +179,7 @@ impl Clone for Config {
             mqtt_persistence_file: self.mqtt_persistence_file.clone(),
             mqtt_client_id: self.mqtt_client_id.clone(),
             pir_pin: self.pir_pin.clone(),
+            device_name: self.device_name.clone(),
         }
     }
 }
