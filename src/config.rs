@@ -74,10 +74,19 @@ impl Config {
     pub fn new() -> Self {
 
         // Get the MQTT server address from the environment, or use the default
-        let mqtt_server = env::var("MQTT_SERVER").unwrap_or_else(|_| {
+        let mqtt_server_url = env::var("MQTT_SERVER").unwrap_or_else(|_| {
             warn!("MQTT_SERVER not set, using default value 'mqtt://localhost'");
             "mqtt://localhost".to_string()
         });
+
+        // Get the MQTT port from the environment, or use the default
+        let mqtt_port = env::var("MQTT_PORT").unwrap_or_else(|_| {
+            warn!("MQTT_PORT not set, using default value '1883'");
+            "1883".to_string()
+        });
+
+        // Construct the MQTT server address
+        let mqtt_server = mqtt_server_url + ":" + &mqtt_port;
 
         // Get the required MQTT client ID from the environment, or panic if it's not set
         let mqtt_client_id: String = match env::var("MQTT_CLIENT_ID") {
@@ -87,12 +96,6 @@ impl Config {
                 panic!("Please set MQTT_CLIENT_ID as an environment variable to uniquely identify this device: {}", e)
             }
         };
-
-        // Get the MQTT port from the environment, or use the default
-        let mqtt_port = env::var("MQTT_PORT").unwrap_or_else(|_| {
-            warn!("MQTT_PORT not set, using default value '1883'");
-            "1883".to_string()
-        });
 
         // Get the MQTT username from the environment, or use the default
         let mqtt_username: String = env::var("MQTT_USERNAME").unwrap_or_else(|_| {
@@ -147,7 +150,10 @@ impl Config {
         info!("Using Config Payload: {config_payload}");
         info!("Using MQTT Username: {mqtt_username}");
         info!("using metion topic: {}", &motion_topic);
-
+        info!("Using MQTT Persistence File: {mqtt_persistence_file}");
+        info!("Using MQTT Client ID: {mqtt_client_id}");
+        info!("Using PIR Pin: {pir_pin}");
+        
         // Return the configuration
         Self {
             device_name,

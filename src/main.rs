@@ -32,74 +32,29 @@ use pir_motion_sensor::sensor::motion::MotionSensor;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
-//use std::process::Command;
 use std::{sync::Arc, time::SystemTime};
-use std::{env, process, process::Command, time::Duration};
+//use std::{env, process, process::Command, time::Duration};
+use std::{env, process::Command, time::Duration};
 use paho_mqtt as mqtt;
 
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    info!("starting up");
+    info!("starting up.\nLoading configuration");
 
     let config = Config::new();
     
-    // Create a client & define connect options
-    info!("Connecting to MQTT server: {}", config.mqtt_server);
-    let _host = env::args()
-        .nth(1)
-        .unwrap_or_else(|| config.mqtt_server.to_string());
-
-    let create_opts = mqtt::CreateOptionsBuilder::new()
-        .server_uri(config.mqtt_server)
-        .client_id(config.mqtt_client_id)
-        .persistence("persist")
-        //.persistence(mqtt::PersistenceType::File)
-        .finalize();
-
-    let cli = mqtt::AsyncClient::new(create_opts).unwrap_or_else(|e| {
-        println!("Error creating the client: {:?}", e);
-        process::exit(1);
-    });
-
-    let conn_opts = mqtt::ConnectOptionsBuilder::new()
-        .keep_alive_interval(Duration::from_secs(20))
-        .user_name(config.mqtt_username)
-        .password(config.mqtt_password)
-        .clean_session(true)
-        .finalize();
-
-    // Connect and wait for it to complete or fail
-    if let Err(err) = cli.connect(conn_opts).wait() {
-        println!("Unable to connect: {}", err);
-        process::exit(1);
-    }
-
-    // Setup MQTT configuration message
-    let msg = MessageBuilder::new()
-        .topic(config.config_topic)
-        .payload(config.config_payload)
-        .qos(0)
-        .retained(true)
-        .finalize();
-
-    // From PAHO example:
-    // Note that with MQTT v5, this would be a good place to use a topic
-    // object with an alias. It might help reduce the size of the messages
-    // if the topic string is long.
-
-    match cli.try_publish(msg) {
-        Err(err) => eprintln!("Error creating/queuing the message to MQTT: {}", err),
-        Ok(tok) => {
-            if let Err(err) = tok.wait() {
-                eprintln!("Error sending message: {}", err);
-            }
-        }
-    }
-    
     info!("setup PIR sensor: ");
 
+    let mqtt_client = match connect_to_mqtt(&config) {
+        Ok(cli) => cli,
+        Err(e) => {
+            eprintln!("Error connecting to MQTT server: {}", e);
+            return;
+        }
+    };
+    
     // channel for sensor data
     #[allow(clippy::type_complexity)]
     let (detections_channel_sender, mut detections_channel_receiver): (
@@ -160,16 +115,22 @@ async fn main() {
     
                 // Publish it to the broker
                 //let tok = cli.publish(Message::new(&config.motion_topic, "ON", 0)).wait();
-                if let Err(err) = cli.publish(Message::new(&config.motion_topic, "ON", 0)).await {
+                if let Err(err) = mqtt_client.publish(Message::new(&config.motion_topic, "ON", 0)).await {
                     eprintln!("Error publishing message: {}", err);
                 }
                     
                 // Shell command
                 let hello = Command::new("sh")
                 .arg("-c")
-                .arg("echo hello")
+                .arg("/usr/bin/xscreensaver-command")
+                .arg("-display")
+                .arg(":0.0")
+                .arg("-deactivate")
                 .output()
                 .expect("failed to execute process");
+            // completed_process = subprocess.run(["/usr/bin/xscreensaver-command", "-display",  \
+            // ":0.0", "-deactivate"], \
+            // stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
                 tokio::time::sleep(Duration::from_millis(1000)).await;
 
@@ -185,11 +146,67 @@ async fn main() {
             
             motion_state = false;
             // Publish it to the broker
-            if let Err(err) = cli.publish(Message::new(&config.motion_topic, "OFF", 0)).await {
+            if let Err(err) = mqtt_client.publish(Message::new(&config.motion_topic, "OFF", 0)).await {
                 eprintln!("Error publishing message: {}", err);
             }
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+
+/// setup MQTT connection
+fn connect_to_mqtt(config: &Config) -> Result<mqtt::AsyncClient, Box<dyn std::error::Error>> {
+    
+    let config = config.clone();
+
+    // Create a client & define connect options
+    info!("Connecting to MQTT server: {}", config.mqtt_server);
+    let _host = env::args()
+        .nth(1)
+        .unwrap_or_else(|| config.mqtt_server.to_string());
+
+    let create_opts = mqtt::CreateOptionsBuilder::new()
+        .server_uri(config.mqtt_server)
+        .client_id(config.mqtt_client_id)
+        .persistence("persist")
+        //.persistence(mqtt::PersistenceType::File)
+        .finalize();
+
+    let cli = mqtt::AsyncClient::new(create_opts)?;
+
+    let conn_opts = mqtt::ConnectOptionsBuilder::new()
+        .keep_alive_interval(Duration::from_secs(20))
+        .user_name(config.mqtt_username)
+        .password(config.mqtt_password)
+        .clean_session(true)
+        .finalize();
+
+    // Connect and wait for it to complete or fail
+    cli.connect(conn_opts).wait()?;
+
+    // Setup MQTT configuration message
+    let msg = MessageBuilder::new()
+        .topic(config.config_topic)
+        .payload(config.config_payload)
+        .qos(0)
+        .retained(true)
+        .finalize();
+
+    // From PAHO example:
+    // Note that with MQTT v5, this would be a good place to use a topic
+    // object with an alias. It might help reduce the size of the messages
+    // if the topic string is long.
+
+    match cli.try_publish(msg) {
+        Err(err) => eprintln!("Error creating/queuing the message to MQTT: {}", err),
+        Ok(tok) => {
+            if let Err(err) = tok.wait() {
+                eprintln!("Error sending message: {}", err);
+            }
+        }
+    }
+
+    Ok(cli)
 }
