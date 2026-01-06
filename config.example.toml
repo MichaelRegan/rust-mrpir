@@ -1,0 +1,137 @@
+# mrpir Configuration File
+#
+# Configuration priority (highest to lowest):
+# 1. Environment variables (MRPIR_*)
+# 2. This file (config.toml)
+# 3. User config ~/.config/mrpir/config.toml
+# 4. System config /etc/mrpir/config.toml
+# 5. Built-in defaults
+
+# Device name used for MQTT topics and Home Assistant
+device_name = "bedroom"
+
+# Display name shown in Home Assistant UI (optional, defaults to device_name)
+# display_name = "Bedroom PIR"
+
+# -----------------------------------------------------------------------------
+# PIR Sensor Configuration
+# -----------------------------------------------------------------------------
+[sensor]
+# GPIO pin number for the PIR sensor (BCM numbering)
+gpio_pin = 17
+
+# Delay in seconds before reporting motion cleared
+no_motion_delay_secs = 5
+
+# Sensor polling interval in milliseconds
+poll_interval_ms = 100
+
+# -----------------------------------------------------------------------------
+# MQTT Configuration
+# -----------------------------------------------------------------------------
+[mqtt]
+# Enable MQTT functionality
+enabled = true
+
+# MQTT broker hostname or IP address
+host = "localhost"
+
+# MQTT broker port
+port = 1883
+
+# MQTT username (optional)
+# username = "iot"
+
+# MQTT password (optional)
+# password = "secret"
+
+# Client ID for MQTT connection (auto-generated if not set)
+# client_id = "mrpir-bedroom"
+
+# Enable Home Assistant MQTT discovery
+ha_discovery = true
+
+# Home Assistant discovery topic prefix
+ha_discovery_prefix = "homeassistant"
+
+# MQTT keep-alive interval in seconds
+keep_alive_secs = 60
+
+# -----------------------------------------------------------------------------
+# Screen Control Configuration
+# -----------------------------------------------------------------------------
+[screen]
+# Enable screen brightness/power control
+enabled = false
+
+# Screen control method: "none", "brightness", "wayland", "xscreensaver"
+# - brightness: Uses sysfs backlight control (works on most Pi displays)
+# - wayland: Uses wlr-randr for wlroots compositors (Sway, Hyprland, etc.)
+# - xscreensaver: Legacy X11 screensaver control (not fully implemented)
+method = "brightness"
+
+# Brightness when dimmed (0-255)
+dim_brightness = 0
+
+# Brightness when bright (0-255)
+bright_brightness = 230
+
+# Optional: Direct path to brightness sysfs file
+# brightness_path = "/sys/class/backlight/10-0045/brightness"
+
+# Transition time in seconds for brightness changes (0 for instant)
+transition_time_secs = 2
+
+# Timeout in seconds before dimming after no motion
+motion_timeout_secs = 30
+
+# -----------------------------------------------------------------------------
+# Night Mode Configuration
+# -----------------------------------------------------------------------------
+[night_mode]
+# Enable night mode (turns off screen during night hours)
+enabled = false
+
+# Use sunrise/sunset times instead of fixed hours
+# Requires location.latitude and location.longitude to be set
+use_sun_times = false
+
+# Hour to start night mode (24-hour format)
+start_hour = 22
+
+# Hour to end night mode (24-hour format)
+end_hour = 6
+
+# Delay after sunset before enabling night mode (seconds)
+sundown_delay_secs = 3600
+
+# Screen off delay during night mode (seconds)
+screen_off_delay_secs = 3600
+
+# -----------------------------------------------------------------------------
+# Location Configuration (for sunrise/sunset calculation)
+# -----------------------------------------------------------------------------
+[location]
+# Friendly location name
+# name = "New York City"
+
+# Region name
+# region = "New York"
+
+# Latitude in decimal degrees
+# Example: 40.7128 for New York City
+# latitude = 40.7128
+
+# Longitude in decimal degrees
+# Example: -74.0060 for New York City
+# longitude = -74.0060
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+[logging]
+# Log level: trace, debug, info, warn, error
+level = "info"
+
+# Optional: Log to file
+# file = "/var/log/mrpir.log"

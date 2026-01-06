@@ -1,191 +1,480 @@
-//! Manages basic configuration variables for the MQTT server and PIR sensor.
+//! Configuration management for mrpir.
 //!
-//! The following environment variables are used and should be stored in an “.env” file:
-//!
-//! * mqtt_server = Defualt is 'mqtt://localhost'
-//! * mqtt_port = Default is '1883'
-//! * mqtt_username = Default is 'iot'
-//! * mqtt_password = Default is 'password'
-//! * motion_topic = Constructed from the device name
-//! * motion_topic = Constructed from the device name
-//! * motion_topic = Constructed from the device name
-//! * mqtt_persistence_file = Default is '/tmp/mqtt_persistence_file'
-//! * mqtt_client_id = Required, no default
-//!
-//!
-//! [`PIR sensor`]: https://michaelregan.github.io/posts/motion-sensor-for-pi/
-#[doc(inline)]
+//! Uses `figment` for layered configuration:
+//! 1. Built-in defaults
+//! 2. System config: /etc/mrpir/config.toml
+//! 3. User config: ~/.config/mrpir/config.toml  
+//! 4. Local config: ./config.toml
+//! 5. Environment variables: MRPIR_*
 
-use std::env;
+use figment::{
+    providers::{Env, Format, Serialized, Toml},
+    Figment,
+};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-/// Gets environment variables and constructs required configuration attributes
+use crate::error::ConfigError;
+
+/// Main configuration structure.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
-
-    /// The required device name from the environment
+    /// Device name for MQTT topics and Home Assistant
+    #[serde(default = "default_device_name")]
     pub device_name: String,
 
-    /// The MQTT server address from the environment, or use the default
-    pub mqtt_server: String,
-    
-    /// The MQTT port from the environment, or use the default
-    pub mqtt_port: String,
-    
-    /// The required MQTT username from the environment, or use the default: 'iot'
-    pub mqtt_username: String,
-    
-    /// The MQTT password from the environment, or use the default
-    pub mqtt_password: String,
-    
-    /// The MQTT payload for the device configuration
-    pub config_payload: String,
-    
-    /// The MQTT topic for the device configuration
-    pub config_topic: String,
-    
-    /// The MQTT topic for the motion sensor state
-    pub motion_topic: String,
-    
-    /// The MQTT persistence file path from the environment, or use the default
-    pub mqtt_persistence_file: String,
-    
-    /// The required device name from the environment, or panic if it's not set
-    pub mqtt_client_id: String,
+    /// Display name shown in Home Assistant
+    #[serde(default)]
+    pub display_name: Option<String>,
 
-    /// The required pin used for the PIR sensor
-    pub pir_pin: u8,
+    /// PIR sensor configuration
+    #[serde(default)]
+    pub sensor: SensorConfig,
+
+    /// MQTT configuration
+    #[serde(default)]
+    pub mqtt: MqttConfig,
+
+    /// Screen control configuration
+    #[serde(default)]
+    pub screen: ScreenConfig,
+
+    /// Night mode configuration
+    #[serde(default)]
+    pub night_mode: NightModeConfig,
+
+    /// Location for sunrise/sunset calculations
+    #[serde(default)]
+    pub location: LocationConfig,
+
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
-// Implementation of the Config struct
-impl Config {
-    /// Create a new configuration from environment variables.
-    ///
-    /// Required environment variables:
-    /// * mqtt_client_id
-    /// * device_name
-    /// * pir_pin
-    /// 
-    /// Optional environment variables:
-    /// * mqtt_server [default: 'mqtt://localhost']
-    /// * mqtt_port [default: '1883']
-    /// * mqtt_username [default: 'iot']
-    /// * mqtt_password [default: 'password']
-    /// * mqtt_persistence_file [default: '/tmp/mqtt_persistence_file']
-    /// 
-    pub fn new() -> Self {
+/// PIR sensor configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SensorConfig {
+    /// GPIO pin number for the PIR sensor
+    #[serde(default = "default_gpio_pin")]
+    pub gpio_pin: u8,
 
-        // Get the MQTT server address from the environment, or use the default
-        let mqtt_server_url = env::var("MQTT_SERVER").unwrap_or_else(|_| {
-            warn!("MQTT_SERVER not set, using default value 'mqtt://localhost'");
-            "mqtt://localhost".to_string()
-        });
+    /// Delay in seconds before considering motion stopped
+    #[serde(default = "default_no_motion_delay")]
+    pub no_motion_delay_secs: u64,
 
-        // Get the MQTT port from the environment, or use the default
-        let mqtt_port = env::var("MQTT_PORT").unwrap_or_else(|_| {
-            warn!("MQTT_PORT not set, using default value '1883'");
-            "1883".to_string()
-        });
+    /// Polling interval in milliseconds
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_ms: u64,
+}
 
-        // Construct the MQTT server address
-        let mqtt_server = mqtt_server_url + ":" + &mqtt_port;
+/// MQTT broker configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MqttConfig {
+    /// Enable MQTT functionality
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 
-        // Get the required MQTT client ID from the environment, or panic if it's not set
-        let mqtt_client_id: String = match env::var("MQTT_CLIENT_ID") {
-            Ok(val) => val,
-            Err(e) => {
-                error!("MQTT_CLIENT_ID not set, please set it as an environment variable to uniquely identify this device:");
-                panic!("Please set MQTT_CLIENT_ID as an environment variable to uniquely identify this device: {}", e)
-            }
-        };
+    /// MQTT broker hostname or IP
+    #[serde(default = "default_mqtt_host")]
+    pub host: String,
 
-        // Get the MQTT username from the environment, or use the default
-        let mqtt_username: String = env::var("MQTT_USERNAME").unwrap_or_else(|_| {
-            warn!("MQTT_USERNAME not set, using default value 'iot'");
-            "iot".to_string()
-        });
+    /// MQTT broker port
+    #[serde(default = "default_mqtt_port")]
+    pub port: u16,
 
-        // Get the MQTT password from the environment, or use the default
-        let mqtt_password: String = env::var("MQTT_PASSWORD").unwrap_or_else(|_| {
-            warn!("MQTT_PASSWORD not set, using default value 'password'");
-            "password".to_string()
-        });
+    /// MQTT username (optional)
+    #[serde(default)]
+    pub username: Option<String>,
 
-        // Get the requied device name from the environment, or panic if it's not set
-        let device_name = match env::var("DEVICE_NAME") {
-            Ok(val) => val,
-            Err(e) => {
-                error!("DEVICE_NAME not set, please set it as an environment variable for the PIR device:");
-                panic!("Please set DEVICE_NAME as an environment variable for the PIR device: {}", e)
-            }            
-        };
+    /// MQTT password (optional)
+    #[serde(default)]
+    pub password: Option<String>,
 
-        // Get the MQTT persistence file path from the environment, or use the default
-        let mqtt_persistence_file: String = env::var("MQTT_PERSISTENCE_FILE").unwrap_or_else(|_| {
-            warn!("MQTT_PERSISTENCE_FILE not set, using default value '/tmp/mqtt_persistence_file'");
-            "/tmp/mqtt_persistence_file".to_string()
-        });
+    /// Client ID for MQTT connection
+    #[serde(default)]
+    pub client_id: Option<String>,
 
-        // Construct the MQTT configuration topic for the device configuration
-        let config_topic = "homeassistant/binary_sensor/".to_string() + &device_name + "/config";
+    /// Enable Home Assistant MQTT discovery
+    #[serde(default = "default_true")]
+    pub ha_discovery: bool,
 
-        // Convert the payload to a string
-        //let config_payload = config_payload_build.to_owned();
-        let config_payload = format!("{{\"name\": \"{device_name}_motion\", \"device_class\": \"motion\", \"unique_id\": \"{mqtt_client_id}_{device_name}_id\", \"state_topic\": \"homeassistant/binary_sensor/{device_name}/state\"}}");
+    /// Home Assistant discovery prefix
+    #[serde(default = "default_ha_prefix")]
+    pub ha_discovery_prefix: String,
 
-        // Construct the MQTT topic for the motion sensor state
-        let motion_topic = format!("homeassistant/binary_sensor/{device_name}/state");
+    /// Keep-alive interval in seconds
+    #[serde(default = "default_keep_alive")]
+    pub keep_alive_secs: u64,
+}
 
-        let pir_pin: u8 = match env::var("PIR_PIN") {
-            Ok(val) => val.parse().unwrap(),
-            Err(e) => {
-                error!("PIR_PIN not set, please set it as an environment variable for the PIR device:");
-                panic!("Please set PIR_PIN as an environment variable for the PIR device: {}", e)
-            }
-        };
+/// Screen control configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ScreenConfig {
+    /// Enable screen control
+    #[serde(default)]
+    pub enabled: bool,
 
-        // Log the configuration
-        info!("Using MQTT Server: {mqtt_server}");
-        info!("Using MQTT Port: {mqtt_port}");
-        info!("Using Device Name: {device_name}");
-        info!("Using Config Topic: {config_topic}");
-        info!("Using Config Payload: {config_payload}");
-        info!("Using MQTT Username: {mqtt_username}");
-        info!("using metion topic: {}", &motion_topic);
-        info!("Using MQTT Persistence File: {mqtt_persistence_file}");
-        info!("Using MQTT Client ID: {mqtt_client_id}");
-        info!("Using PIR Pin: {pir_pin}");
-        
-        // Return the configuration
+    /// Screen control method
+    #[serde(default)]
+    pub method: ScreenMethod,
+
+    /// Brightness when dimmed (0-255)
+    #[serde(default)]
+    pub dim_brightness: u8,
+
+    /// Brightness when bright (0-255)
+    #[serde(default = "default_bright_brightness")]
+    pub bright_brightness: u8,
+
+    /// Path to brightness sysfs file (for manual control)
+    #[serde(default)]
+    pub brightness_path: Option<PathBuf>,
+
+    /// Transition time in seconds for brightness changes
+    #[serde(default = "default_transition_time")]
+    pub transition_time_secs: u64,
+
+    /// Timeout before dimming after no motion (seconds)
+    #[serde(default = "default_screen_timeout")]
+    pub motion_timeout_secs: u64,
+}
+
+/// Screen control methods.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenMethod {
+    /// No screen control
+    #[default]
+    None,
+    /// Use brightness crate (sysfs-based)
+    Brightness,
+    /// Use Wayland wlr-output-power-management
+    Wayland,
+    /// Use xscreensaver command (legacy)
+    Xscreensaver,
+}
+
+/// Night mode configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NightModeConfig {
+    /// Enable night mode
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Use sunrise/sunset instead of fixed hours
+    #[serde(default)]
+    pub use_sun_times: bool,
+
+    /// Hour to start night mode (24-hour format)
+    #[serde(default = "default_night_start")]
+    pub start_hour: u8,
+
+    /// Hour to end night mode (24-hour format)
+    #[serde(default = "default_night_end")]
+    pub end_hour: u8,
+
+    /// Delay after sunset before enabling night mode (seconds)
+    #[serde(default = "default_sundown_timeout")]
+    pub sundown_delay_secs: u64,
+
+    /// Screen off delay during night mode (seconds)
+    #[serde(default = "default_screen_off_delay")]
+    pub screen_off_delay_secs: u64,
+}
+
+/// Location configuration for sunrise/sunset.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct LocationConfig {
+    /// Friendly location name
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Region name
+    #[serde(default)]
+    pub region: Option<String>,
+
+    /// Latitude in decimal degrees
+    #[serde(default)]
+    pub latitude: Option<f64>,
+
+    /// Longitude in decimal degrees
+    #[serde(default)]
+    pub longitude: Option<f64>,
+}
+
+/// Logging configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LoggingConfig {
+    /// Log level (trace, debug, info, warn, error)
+    #[serde(default = "default_log_level")]
+    pub level: String,
+
+    /// Log to file
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+}
+
+// Default value functions
+fn default_device_name() -> String {
+    hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "mrpir".to_string())
+}
+
+fn default_gpio_pin() -> u8 {
+    17
+}
+
+fn default_no_motion_delay() -> u64 {
+    5
+}
+
+fn default_poll_interval() -> u64 {
+    100
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_mqtt_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_mqtt_port() -> u16 {
+    1883
+}
+
+fn default_ha_prefix() -> String {
+    "homeassistant".to_string()
+}
+
+fn default_keep_alive() -> u64 {
+    60
+}
+
+fn default_bright_brightness() -> u8 {
+    230
+}
+
+fn default_transition_time() -> u64 {
+    2
+}
+
+fn default_screen_timeout() -> u64 {
+    30
+}
+
+fn default_night_start() -> u8 {
+    22
+}
+
+fn default_night_end() -> u8 {
+    6
+}
+
+fn default_sundown_timeout() -> u64 {
+    3600
+}
+
+fn default_screen_off_delay() -> u64 {
+    3600
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+// Default trait implementations
+impl Default for Config {
+    fn default() -> Self {
         Self {
-            device_name,
-            mqtt_server,
-            mqtt_port,
-            config_payload,
-            config_topic,
-            motion_topic,
-            mqtt_username,
-            mqtt_password,
-            mqtt_persistence_file,
-            mqtt_client_id,
-            pir_pin,
+            device_name: default_device_name(),
+            display_name: None,
+            sensor: SensorConfig::default(),
+            mqtt: MqttConfig::default(),
+            screen: ScreenConfig::default(),
+            night_mode: NightModeConfig::default(),
+            location: LocationConfig::default(),
+            logging: LoggingConfig::default(),
         }
     }
 }
 
-/// This implementation creates a new Config struct with all of the fields cloned from the original struct using the clone method. This allows you to create a new Config instance that is a copy of an existing instance.
-impl Clone for Config {
-    fn clone(&self) -> Self {
+impl Default for SensorConfig {
+    fn default() -> Self {
         Self {
-            mqtt_server: self.mqtt_server.clone(),
-            mqtt_port: self.mqtt_port.clone(),
-            config_payload: self.config_payload.clone(),
-            config_topic: self.config_topic.clone(),
-            motion_topic: self.motion_topic.clone(),
-            mqtt_username: self.mqtt_username.clone(),
-            mqtt_password: self.mqtt_password.clone(),
-            mqtt_persistence_file: self.mqtt_persistence_file.clone(),
-            mqtt_client_id: self.mqtt_client_id.clone(),
-            pir_pin: self.pir_pin.clone(),
-            device_name: self.device_name.clone(),
+            gpio_pin: default_gpio_pin(),
+            no_motion_delay_secs: default_no_motion_delay(),
+            poll_interval_ms: default_poll_interval(),
         }
+    }
+}
+
+impl Default for MqttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: default_mqtt_host(),
+            port: default_mqtt_port(),
+            username: None,
+            password: None,
+            client_id: None,
+            ha_discovery: true,
+            ha_discovery_prefix: default_ha_prefix(),
+            keep_alive_secs: default_keep_alive(),
+        }
+    }
+}
+
+impl Default for ScreenConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            method: ScreenMethod::None,
+            dim_brightness: 0,
+            bright_brightness: default_bright_brightness(),
+            brightness_path: None,
+            transition_time_secs: default_transition_time(),
+            motion_timeout_secs: default_screen_timeout(),
+        }
+    }
+}
+
+impl Default for NightModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            use_sun_times: false,
+            start_hour: default_night_start(),
+            end_hour: default_night_end(),
+            sundown_delay_secs: default_sundown_timeout(),
+            screen_off_delay_secs: default_screen_off_delay(),
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            file: None,
+        }
+    }
+}
+
+impl Config {
+    /// Load configuration from all sources.
+    ///
+    /// Priority (highest to lowest):
+    /// 1. Environment variables (MRPIR_*)
+    /// 2. Local config.toml
+    /// 3. User config ~/.config/mrpir/config.toml
+    /// 4. System config /etc/mrpir/config.toml
+    /// 5. Built-in defaults
+    pub fn load() -> Result<Self, ConfigError> {
+        let home_config = dirs::config_dir()
+            .map(|p| p.join("mrpir/config.toml"))
+            .unwrap_or_else(|| PathBuf::from("~/.config/mrpir/config.toml"));
+
+        let config: Config = Figment::new()
+            // Start with defaults
+            .merge(Serialized::defaults(Config::default()))
+            // System config
+            .merge(Toml::file("/etc/mrpir/config.toml").nested())
+            // User config
+            .merge(Toml::file(&home_config).nested())
+            // Local config
+            .merge(Toml::file("config.toml").nested())
+            // Environment variables (MRPIR_MQTT_HOST, MRPIR_SENSOR_GPIO_PIN, etc.)
+            .merge(Env::prefixed("MRPIR_").split("_"))
+            .extract()?;
+
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validate configuration values.
+    fn validate(&self) -> Result<(), ConfigError> {
+        // Validate GPIO pin range (Raspberry Pi has pins 0-27)
+        if self.sensor.gpio_pin > 27 {
+            return Err(ConfigError::InvalidValue {
+                field: "sensor.gpio_pin".to_string(),
+                message: format!("GPIO pin must be 0-27, got {}", self.sensor.gpio_pin),
+            });
+        }
+
+        // Validate night mode hours
+        if self.night_mode.start_hour > 23 || self.night_mode.end_hour > 23 {
+            return Err(ConfigError::InvalidValue {
+                field: "night_mode.start_hour/end_hour".to_string(),
+                message: "Hours must be 0-23".to_string(),
+            });
+        }
+
+        // Validate location if sun times are enabled
+        if self.night_mode.use_sun_times {
+            if self.location.latitude.is_none() || self.location.longitude.is_none() {
+                return Err(ConfigError::MissingRequired(
+                    "location.latitude and location.longitude required when use_sun_times is enabled".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the effective client ID.
+    pub fn client_id(&self) -> String {
+        self.mqtt
+            .client_id
+            .clone()
+            .unwrap_or_else(|| format!("mrpir-{}", self.device_name))
+    }
+
+    /// Get the display name for Home Assistant.
+    pub fn display_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.device_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.sensor.gpio_pin, 17);
+        assert_eq!(config.mqtt.port, 1883);
+        assert!(config.mqtt.enabled);
+    }
+
+    #[test]
+    fn test_validation_invalid_gpio() {
+        let mut config = Config::default();
+        config.sensor.gpio_pin = 50;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validation_sun_times_without_location() {
+        let mut config = Config::default();
+        config.night_mode.use_sun_times = true;
+        config.location.latitude = None;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_client_id_generation() {
+        let mut config = Config::default();
+        config.device_name = "bedroom".to_string();
+        config.mqtt.client_id = None;
+        assert_eq!(config.client_id(), "mrpir-bedroom");
+
+        config.mqtt.client_id = Some("custom-id".to_string());
+        assert_eq!(config.client_id(), "custom-id");
     }
 }

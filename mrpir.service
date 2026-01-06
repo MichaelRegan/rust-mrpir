@@ -1,0 +1,30 @@
+[Unit]
+Description=PIR Motion Sensor Daemon
+Documentation=https://github.com/MichaelRegan/rust-mrpir
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/mrpir
+Restart=on-failure
+RestartSec=5
+WatchdogSec=30
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+# GPIO access (required for PIR sensor)
+SupplementaryGroups=gpio
+
+# Environment file for configuration overrides
+EnvironmentFile=-/etc/mrpir/environment
+
+# Working directory for config.toml
+WorkingDirectory=/etc/mrpir
+
+[Install]
+WantedBy=multi-user.target

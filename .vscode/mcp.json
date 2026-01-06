@@ -1,0 +1,7 @@
+{
+  "servers": {
+    "rust-analyzer": {
+      "command": "/home/michael/.cargo/bin/rust-analyzer-mcp"
+    }
+  }
+}
