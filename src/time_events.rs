@@ -1,6 +1,6 @@
 //! Time-based events for night mode and sunrise/sunset.
 
-use chrono::{Local, NaiveTime, Timelike};
+use chrono::{Datelike, Local, NaiveTime, Timelike};
 use tracing::{debug, info};
 
 use crate::config::{LocationConfig, NightModeConfig};
@@ -29,15 +29,6 @@ impl SunTimes {
     pub fn for_today(latitude: f64, longitude: f64) -> Option<Self> {
         let now = Local::now();
         let day_of_year = now.ordinal() as i64;
-        let year = now.year();
-
-        // Use astro crate for calculation
-        // astro uses Julian Day Number
-        let jd = astro::time::julian_day(
-            day_of_year as i16,
-            (year % 100) as i16,
-            (year / 100) as i16,
-        );
 
         // Calculate approximate sun times
         // Note: astro crate works with equatorial coordinates

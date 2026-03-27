@@ -92,7 +92,7 @@ impl ScreenController for BrightnessController {
 
             while let Some(device) = devices.next().await {
                 match device {
-                    Ok(dev) => {
+                    Ok(mut dev) => {
                         // Convert 0-255 to percentage
                         let percentage = (level as u32 * 100) / 255;
                         if let Err(e) = dev.set(percentage).await {

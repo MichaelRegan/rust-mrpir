@@ -197,28 +197,34 @@ async fn main() -> Result<()> {
     let shutdown_tx_clone = shutdown_tx.clone();
 
     tokio::spawn(async move {
-        let ctrl_c = tokio::signal::ctrl_c();
-
         #[cfg(unix)]
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("Failed to install SIGTERM handler");
+        {
+            let ctrl_c = tokio::signal::ctrl_c();
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM handler");
 
-        tokio::select! {
-            _ = ctrl_c => {
-                info!("Received SIGINT, shutting down...");
+            tokio::select! {
+                _ = ctrl_c => {
+                    info!("Received SIGINT, shutting down...");
+                }
+                _ = sigterm.recv() => {
+                    info!("Received SIGTERM, shutting down...");
+                }
             }
-            #[cfg(unix)]
-            _ = sigterm.recv() => {
-                info!("Received SIGTERM, shutting down...");
-            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("Received SIGINT, shutting down...");
         }
 
         let _ = shutdown_tx_clone.send(true);
     });
 
     // Notify systemd we're ready
-    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
 
     // Set up MQTT if enabled
     let mut mqtt_rx = None;
@@ -272,7 +278,7 @@ async fn main() -> Result<()> {
     }
 
     // Get watchdog interval if running under systemd
-    let watchdog_interval = sd_notify::watchdog_enabled(false).map(|d| d / 2);
+    let watchdog_interval = sd_notify::watchdog_enabled().map(|d| d / 2);
 
     info!("Entering main loop");
 
@@ -320,7 +326,7 @@ async fn main() -> Result<()> {
                     std::future::pending::<()>().await;
                 }
             } => {
-                let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]);
+                let _ = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]);
             }
         }
     }
@@ -339,7 +345,7 @@ async fn main() -> Result<()> {
     }
 
     // Notify systemd we're stopping
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
 
     info!("Goodbye!");
     Ok(())

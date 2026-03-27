@@ -12,14 +12,14 @@ categories = ["hardware-support", "embedded"]
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "fs"] }
+tokio = { version = "1.50", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "fs"] }
 tokio-util = "0.7"
 
 # MQTT (pure Rust, async-native)
-rumqttc = "0.24"
+rumqttc = "0.25"
 
 # GPIO for Raspberry Pi
-rppal = "0.19"
+rppal = "0.22"
 
 # Configuration (TOML + env var layering)
 figment = { version = "0.10", features = ["toml", "env"] }
@@ -28,17 +28,17 @@ serde_json = "1.0"
 
 # Platform info
 hostname = "0.4"
-dirs = "5.0"
+dirs = "6.0"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Systemd integration
-sd-notify = "0.4"
+sd-notify = "0.5"
 
 # Screen brightness control (sysfs-based, default)
-brightness = { version = "0.5", optional = true }
+brightness = { version = "0.8", optional = true }
 futures-util = { version = "0.3", optional = true }
 
 # Wayland screen control (optional)
@@ -50,7 +50,7 @@ chrono = "0.4"
 astro = "2.0"
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 
 # Async trait support
