@@ -383,13 +383,13 @@ impl Config {
             // Start with defaults
             .merge(Serialized::defaults(Config::default()))
             // System config
-            .merge(Toml::file("/etc/mrpir/config.toml").nested())
+            .merge(Toml::file("/etc/mrpir/config.toml"))
             // User config
-            .merge(Toml::file(&home_config).nested())
+            .merge(Toml::file(&home_config))
             // Local config
-            .merge(Toml::file("config.toml").nested())
-            // Environment variables (MRPIR_MQTT_HOST, MRPIR_SENSOR_GPIO_PIN, etc.)
-            .merge(Env::prefixed("MRPIR_").split("_"))
+            .merge(Toml::file("config.toml"))
+            // Environment variables (MRPIR_MQTT__HOST, MRPIR_SENSOR__GPIO_PIN, etc.)
+            .merge(Env::prefixed("MRPIR_").split("__"))
             .extract()?;
 
         config.validate()?;

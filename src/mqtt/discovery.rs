@@ -82,7 +82,8 @@ impl HaDiscoveryPayload {
         Self {
             name: format!("{display_name} Motion"),
             device_class: "motion".to_string(),
-            unique_id: format!("{client_id}_{device_name}_motion"),
+            // Match Python format for seamless migration: pir_{device}_id_{device}_id
+            unique_id: format!("pir_{device_name}_id_{device_name}_id"),
             state_topic,
             payload_on: Some("ON".to_string()),
             payload_off: Some("OFF".to_string()),

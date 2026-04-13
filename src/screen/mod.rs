@@ -4,83 +4,94 @@ mod brightness_ctrl;
 #[cfg(feature = "wayland-control")]
 mod wayland;
 
-use async_trait::async_trait;
-use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::config::{ScreenConfig, ScreenMethod};
 use crate::error::ScreenError;
 
-/// Trait for screen control backends.
-#[async_trait]
-pub trait ScreenController: Send + Sync {
-    /// Turn the screen on.
-    async fn turn_on(&self) -> Result<(), ScreenError>;
+use brightness_ctrl::BrightnessController;
+#[cfg(feature = "wayland-control")]
+use wayland::WaylandController;
 
-    /// Turn the screen off.
-    async fn turn_off(&self) -> Result<(), ScreenError>;
-
-    /// Set brightness level (0-255).
-    async fn set_brightness(&self, level: u8) -> Result<(), ScreenError>;
-
-    /// Get current brightness level.
-    async fn get_brightness(&self) -> Result<u8, ScreenError>;
-
-    /// Check if screen control is available.
-    fn is_available(&self) -> bool;
+/// Screen controller enum - avoids trait objects and async-trait overhead.
+pub enum ScreenController {
+    /// No-op controller when screen control is disabled
+    NoOp,
+    /// Brightness control via sysfs or brightness crate
+    Brightness(BrightnessController),
+    /// Wayland wlr-output-power control
+    #[cfg(feature = "wayland-control")]
+    Wayland(WaylandController),
 }
 
-/// No-op screen controller when screen control is disabled.
-pub struct NoOpController;
-
-#[async_trait]
-impl ScreenController for NoOpController {
-    async fn turn_on(&self) -> Result<(), ScreenError> {
-        debug!("Screen control disabled: turn_on ignored");
-        Ok(())
+impl ScreenController {
+    /// Turn the screen on.
+    pub async fn turn_on(&self) -> Result<(), ScreenError> {
+        match self {
+            Self::NoOp => {
+                debug!("Screen control disabled: turn_on ignored");
+                Ok(())
+            }
+            Self::Brightness(ctrl) => ctrl.turn_on().await,
+            #[cfg(feature = "wayland-control")]
+            Self::Wayland(ctrl) => ctrl.turn_on().await,
+        }
     }
 
-    async fn turn_off(&self) -> Result<(), ScreenError> {
-        debug!("Screen control disabled: turn_off ignored");
-        Ok(())
+    /// Turn the screen off.
+    pub async fn turn_off(&self) -> Result<(), ScreenError> {
+        match self {
+            Self::NoOp => {
+                debug!("Screen control disabled: turn_off ignored");
+                Ok(())
+            }
+            Self::Brightness(ctrl) => ctrl.turn_off().await,
+            #[cfg(feature = "wayland-control")]
+            Self::Wayland(ctrl) => ctrl.turn_off().await,
+        }
     }
 
-    async fn set_brightness(&self, _level: u8) -> Result<(), ScreenError> {
-        debug!("Screen control disabled: set_brightness ignored");
-        Ok(())
+    /// Set brightness level (0-255).
+    pub async fn set_brightness(&self, level: u8) -> Result<(), ScreenError> {
+        match self {
+            Self::NoOp => {
+                debug!("Screen control disabled: set_brightness ignored");
+                Ok(())
+            }
+            Self::Brightness(ctrl) => ctrl.set_brightness(level).await,
+            #[cfg(feature = "wayland-control")]
+            Self::Wayland(ctrl) => ctrl.set_brightness(level).await,
+        }
     }
 
-    async fn get_brightness(&self) -> Result<u8, ScreenError> {
-        Ok(255)
-    }
-
-    fn is_available(&self) -> bool {
-        false
+    /// Check if screen control is available.
+    pub fn is_available(&self) -> bool {
+        !matches!(self, Self::NoOp)
     }
 }
 
 /// Create a screen controller based on configuration.
-pub fn create_controller(config: &ScreenConfig) -> Result<Arc<dyn ScreenController>, ScreenError> {
+pub fn create_controller(config: &ScreenConfig) -> Result<ScreenController, ScreenError> {
     if !config.enabled {
         info!("Screen control disabled");
-        return Ok(Arc::new(NoOpController));
+        return Ok(ScreenController::NoOp);
     }
 
     match config.method {
         ScreenMethod::None => {
             info!("Screen control method: none");
-            Ok(Arc::new(NoOpController))
+            Ok(ScreenController::NoOp)
         }
         ScreenMethod::Brightness => {
             info!("Screen control method: brightness (sysfs)");
-            Ok(Arc::new(brightness_ctrl::BrightnessController::new(
+            Ok(ScreenController::Brightness(BrightnessController::new(
                 config.brightness_path.clone(),
             )?))
         }
         #[cfg(feature = "wayland-control")]
         ScreenMethod::Wayland => {
             info!("Screen control method: wayland");
-            Ok(Arc::new(wayland::WaylandController::new()?))
+            Ok(ScreenController::Wayland(WaylandController::new()?))
         }
         #[cfg(not(feature = "wayland-control"))]
         ScreenMethod::Wayland => Err(ScreenError::NotAvailable(
@@ -95,7 +106,7 @@ pub fn create_controller(config: &ScreenConfig) -> Result<Arc<dyn ScreenControll
 
 /// Screen manager that handles brightness transitions and timeouts.
 pub struct ScreenManager {
-    controller: Arc<dyn ScreenController>,
+    controller: ScreenController,
     config: ScreenConfig,
     current_brightness: u8,
 }

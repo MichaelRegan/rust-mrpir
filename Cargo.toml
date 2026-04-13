@@ -12,23 +12,23 @@ categories = ["hardware-support", "embedded"]
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "fs"] }
 tokio-util = "0.7"
 
 # MQTT (pure Rust, async-native)
 rumqttc = "0.24"
 
 # GPIO for Raspberry Pi
-rppal = "0.19"
+rppal = "0.22"
 
 # Configuration (TOML + env var layering)
 figment = { version = "0.10", features = ["toml", "env"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # Platform info
 hostname = "0.4"
-dirs = "5.0"
+dirs = "6"
 
 # Logging
 tracing = "0.1"
@@ -46,23 +46,34 @@ wayland-client = { version = "0.31", optional = true }
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 
 # Time/date handling and sunrise/sunset
-chrono = "0.4"
-astro = "2.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
-
-# Async trait support
-async-trait = "0.1"
+thiserror = "2"
+anyhow = "1"
 
 [features]
 default = ["brightness-control"]
 brightness-control = ["brightness", "futures-util"]
 wayland-control = ["wayland-client", "wayland-protocols-wlr"]
 
+[dev-dependencies]
+tempfile = "3"
+toml = "0.8"
+serde_json = "1"
+
 [profile.release]
 lto = true
 strip = true
 panic = "abort"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
 

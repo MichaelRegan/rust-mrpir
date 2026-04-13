@@ -3,6 +3,7 @@
 use rppal::gpio::{Gpio, InputPin, Level};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::SensorConfig;
@@ -26,18 +27,18 @@ pub struct PirSensor {
 impl PirSensor {
     /// Create a new PIR sensor on the specified GPIO pin.
     pub fn new(config: &SensorConfig) -> Result<Self, SensorError> {
-        info!("Initializing PIR sensor on GPIO pin {}", config.gpio_pin);
+        info!(pin = config.gpio_pin, "Initializing PIR sensor");
 
         let gpio = Gpio::new()?;
         let pin = gpio
             .get(config.gpio_pin)
             .map_err(|e| {
-                error!("Failed to get GPIO pin {}: {}", config.gpio_pin, e);
+                error!(pin = config.gpio_pin, error = %e, "Failed to get GPIO pin");
                 SensorError::GpioInit(e)
             })?
             .into_input_pulldown();
 
-        info!("PIR sensor initialized successfully");
+        info!(pin = config.gpio_pin, "PIR sensor initialized successfully");
 
         Ok(Self {
             pin,
@@ -56,7 +57,7 @@ impl PirSensor {
     pub async fn run(
         &self,
         tx: mpsc::Sender<MotionEvent>,
-        mut shutdown: tokio::sync::watch::Receiver<bool>,
+        shutdown: CancellationToken,
     ) {
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         let no_motion_delay = Duration::from_secs(self.config.no_motion_delay_secs);
@@ -66,17 +67,16 @@ impl PirSensor {
         let mut last_motion_time = std::time::Instant::now();
 
         info!(
-            "Starting PIR sensor polling (interval: {:?}, no_motion_delay: {:?})",
-            poll_interval, no_motion_delay
+            poll_interval_ms = self.config.poll_interval_ms,
+            no_motion_delay_secs = self.config.no_motion_delay_secs,
+            "Starting PIR sensor polling"
         );
 
         loop {
             tokio::select! {
-                _ = shutdown.changed() => {
-                    if *shutdown.borrow() {
-                        info!("PIR sensor shutting down");
-                        break;
-                    }
+                _ = shutdown.cancelled() => {
+                    info!("PIR sensor shutting down");
+                    break;
                 }
                 _ = tokio::time::sleep(poll_interval) => {
                     let current_state = self.read();

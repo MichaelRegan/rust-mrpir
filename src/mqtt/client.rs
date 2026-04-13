@@ -3,7 +3,7 @@
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::MqttConfig;
 use crate::error::MqttError;
@@ -30,7 +30,7 @@ impl MqttClient {
     /// Create a new MQTT client and start the event loop.
     ///
     /// Returns the client and a receiver for connection events.
-    pub async fn new(
+    pub fn new(
         config: &MqttConfig,
         device_name: &str,
         display_name: &str,
@@ -62,9 +62,8 @@ impl MqttClient {
         let (event_tx, event_rx) = mpsc::channel(10);
 
         // Spawn the event loop handler
-        let availability_topic_clone = availability_topic.clone();
         tokio::spawn(async move {
-            Self::run_eventloop(eventloop, event_tx, availability_topic_clone).await;
+            Self::run_eventloop(eventloop, event_tx).await;
         });
 
         let mqtt_client = Self {
@@ -79,11 +78,7 @@ impl MqttClient {
     }
 
     /// Run the MQTT event loop.
-    async fn run_eventloop(
-        mut eventloop: EventLoop,
-        event_tx: mpsc::Sender<MqttEvent>,
-        availability_topic: String,
-    ) {
+    async fn run_eventloop(mut eventloop: EventLoop, event_tx: mpsc::Sender<MqttEvent>) {
         let mut connected = false;
 
         loop {
@@ -94,7 +89,7 @@ impl MqttClient {
                         connected = true;
                         let _ = event_tx.send(MqttEvent::Connected).await;
                     } else {
-                        warn!("MQTT connection failed: {:?}", ack.code);
+                        warn!(return_code = ?ack.code, "MQTT connection failed");
                     }
                 }
                 Ok(Event::Incoming(Packet::PubAck(_))) => {
@@ -107,15 +102,15 @@ impl MqttClient {
                     // Ignore outgoing events
                 }
                 Ok(event) => {
-                    debug!("MQTT event: {:?}", event);
+                    debug!(?event, "MQTT event");
                 }
                 Err(e) => {
                     if connected {
-                        warn!("MQTT disconnected: {}", e);
+                        warn!(error = %e, "MQTT disconnected");
                         connected = false;
                         let _ = event_tx.send(MqttEvent::Disconnected).await;
                     } else {
-                        debug!("MQTT connection attempt failed: {}", e);
+                        debug!(error = %e, "MQTT connection attempt failed");
                     }
                     // rumqttc handles reconnection automatically
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -143,8 +138,8 @@ impl MqttClient {
             .to_json()
             .map_err(|e| MqttError::InvalidConfig(e.to_string()))?;
 
-        info!("Publishing HA discovery to {}", topic);
-        debug!("Discovery payload: {}", json);
+        info!(topic = %topic, "Publishing HA discovery");
+        debug!(payload = %json, "Discovery payload");
 
         self.client
             .publish(&topic, QoS::AtLeastOnce, true, json.as_bytes())

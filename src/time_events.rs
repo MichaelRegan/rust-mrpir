@@ -1,6 +1,6 @@
 //! Time-based events for night mode and sunrise/sunset.
 
-use chrono::{Local, NaiveTime, Timelike};
+use chrono::{Datelike, Local, NaiveTime, Timelike};
 use tracing::{debug, info};
 
 use crate::config::{LocationConfig, NightModeConfig};
@@ -29,58 +29,54 @@ impl SunTimes {
     pub fn for_today(latitude: f64, longitude: f64) -> Option<Self> {
         let now = Local::now();
         let day_of_year = now.ordinal() as i64;
-        let year = now.year();
+        
+        // Get timezone offset in hours from UTC
+        let tz_offset_secs = now.offset().local_minus_utc();
+        let tz_offset_hours = tz_offset_secs as f64 / 3600.0;
 
-        // Use astro crate for calculation
-        // astro uses Julian Day Number
-        let jd = astro::time::julian_day(
-            day_of_year as i16,
-            (year % 100) as i16,
-            (year / 100) as i16,
-        );
+        // Calculate sun times (returns hours in UTC)
+        let sunrise_utc = calculate_sun_time(latitude, longitude, day_of_year, true);
+        let sunset_utc = calculate_sun_time(latitude, longitude, day_of_year, false);
 
-        // Calculate approximate sun times
-        // Note: astro crate works with equatorial coordinates
-        // For simplicity, we'll use a basic sunrise/sunset formula
+        // Convert to local time by adding timezone offset
+        let sunrise_local = sunrise_utc + tz_offset_hours;
+        let sunset_local = sunset_utc + tz_offset_hours;
 
-        let sunrise_hour = calculate_sun_time(latitude, day_of_year, true);
-        let sunset_hour = calculate_sun_time(latitude, day_of_year, false);
+        // Normalize to 0-24 range
+        let sunrise_normalized = ((sunrise_local % 24.0) + 24.0) % 24.0;
+        let sunset_normalized = ((sunset_local % 24.0) + 24.0) % 24.0;
 
-        // Adjust for longitude (rough approximation)
-        // 15 degrees = 1 hour
-        let longitude_offset = longitude / 15.0;
+        // Convert decimal hours to hours and minutes
+        let sunrise_hour = sunrise_normalized.floor() as u32;
+        let sunrise_min = ((sunrise_normalized - sunrise_hour as f64) * 60.0).round() as u32;
+        
+        let sunset_hour = sunset_normalized.floor() as u32;
+        let sunset_min = ((sunset_normalized - sunset_hour as f64) * 60.0).round() as u32;
 
-        let sunrise_adjusted = sunrise_hour - longitude_offset;
-        let sunset_adjusted = sunset_hour - longitude_offset;
-
-        // Convert to local time (very approximate)
-        let sunrise_minutes = ((sunrise_adjusted.fract().abs()) * 60.0) as u32;
-        let sunset_minutes = ((sunset_adjusted.fract().abs()) * 60.0) as u32;
-
-        let sunrise =
-            NaiveTime::from_hms_opt(sunrise_adjusted.abs() as u32 % 24, sunrise_minutes, 0)?;
-        let sunset =
-            NaiveTime::from_hms_opt(sunset_adjusted.abs() as u32 % 24, sunset_minutes, 0)?;
+        let sunrise = NaiveTime::from_hms_opt(sunrise_hour % 24, sunrise_min % 60, 0)?;
+        let sunset = NaiveTime::from_hms_opt(sunset_hour % 24, sunset_min % 60, 0)?;
 
         Some(Self { sunrise, sunset })
     }
 }
 
-/// Calculate approximate sunrise or sunset hour using a simplified formula.
+/// Calculate approximate sunrise or sunset hour using NOAA formula.
 /// Returns hours in UTC.
-fn calculate_sun_time(latitude: f64, day_of_year: i64, is_sunrise: bool) -> f64 {
-    // Simplified sunrise/sunset calculation
-    // Based on NOAA Solar Calculator equations
+fn calculate_sun_time(latitude: f64, longitude: f64, day_of_year: i64, is_sunrise: bool) -> f64 {
+    // NOAA Solar Calculator equations
+    // Reference: https://gml.noaa.gov/grad/solcalc/solareqns.PDF
 
     let lat_rad = latitude.to_radians();
 
-    // Fractional year (gamma)
+    // Fractional year (gamma) in radians
     let gamma = 2.0 * std::f64::consts::PI * (day_of_year as f64 - 1.0) / 365.0;
 
     // Equation of time (minutes)
-    let eq_time = 229.18 * (0.000075 + 0.001868 * gamma.cos() - 0.032077 * gamma.sin()
-        - 0.014615 * (2.0 * gamma).cos()
-        - 0.040849 * (2.0 * gamma).sin());
+    let eq_time = 229.18
+        * (0.000075 + 0.001868 * gamma.cos()
+            - 0.032077 * gamma.sin()
+            - 0.014615 * (2.0 * gamma).cos()
+            - 0.040849 * (2.0 * gamma).sin());
 
     // Solar declination (radians)
     let decl = 0.006918 - 0.399912 * gamma.cos() + 0.070257 * gamma.sin()
@@ -89,20 +85,24 @@ fn calculate_sun_time(latitude: f64, day_of_year: i64, is_sunrise: bool) -> f64 
         - 0.002697 * (3.0 * gamma).cos()
         + 0.00148 * (3.0 * gamma).sin();
 
-    // Hour angle
-    let zenith = 90.833_f64.to_radians(); // Official sunrise/sunset
+    // Hour angle for sunrise/sunset
+    let zenith = 90.833_f64.to_radians(); // Official sunrise/sunset (includes refraction)
     let cos_hour_angle = (zenith.cos() / (lat_rad.cos() * decl.cos())) - lat_rad.tan() * decl.tan();
 
-    // Clamp to valid range
+    // Clamp to valid range (handles polar day/night)
     let cos_ha = cos_hour_angle.clamp(-1.0, 1.0);
     let hour_angle = cos_ha.acos().to_degrees();
 
-    // Calculate time
-    if is_sunrise {
-        (720.0 - 4.0 * hour_angle - eq_time) / 60.0
+    // Calculate time in minutes from midnight UTC
+    // Formula: time = 720 - 4*longitude - eqtime +/- 4*ha
+    let time_minutes = if is_sunrise {
+        720.0 - 4.0 * longitude - eq_time - 4.0 * hour_angle
     } else {
-        (720.0 + 4.0 * hour_angle - eq_time) / 60.0
-    }
+        720.0 - 4.0 * longitude - eq_time + 4.0 * hour_angle
+    };
+
+    // Convert to hours
+    time_minutes / 60.0
 }
 
 /// Night mode manager.
@@ -173,7 +173,10 @@ impl NightModeManager {
                 if let Some(times) =
                     SunTimes::for_today(location.latitude.unwrap(), location.longitude.unwrap())
                 {
-                    info!("Calculated sun times: sunrise {:?}, sunset {:?}", times.sunrise, times.sunset);
+                    info!(
+                        "Calculated sun times: sunrise {:?}, sunset {:?}",
+                        times.sunrise, times.sunset
+                    );
                     self.cached_sun_times = Some((today, times));
                     &self.cached_sun_times.as_ref().unwrap().1
                 } else {
@@ -187,8 +190,8 @@ impl NightModeManager {
         let now = Local::now().time();
 
         // Apply sunset delay
-        let sunset_with_delay = sun_times.sunset
-            + chrono::Duration::seconds(self.config.sundown_delay_secs as i64);
+        let sunset_with_delay =
+            sun_times.sunset + chrono::Duration::seconds(self.config.sundown_delay_secs as i64);
 
         // Night is after sunset+delay or before sunrise
         now >= sunset_with_delay || now < sun_times.sunrise
@@ -278,13 +281,13 @@ mod tests {
 
     #[test]
     fn test_sun_calculation() {
-        // Test for a known location (New York City area)
-        let sunrise = calculate_sun_time(40.7, 172, true); // ~June 21
-        let sunset = calculate_sun_time(40.7, 172, false);
+        // Test for a known location (New York City area, longitude -74)
+        let sunrise = calculate_sun_time(40.7, -74.0, 172, true); // ~June 21
+        let sunset = calculate_sun_time(40.7, -74.0, 172, false);
 
-        // Sunrise should be early (around 4-6 UTC for summer solstice)
-        assert!(sunrise > 0.0 && sunrise < 12.0);
-        // Sunset should be late (around 19-21 UTC)
-        assert!(sunset > 12.0 && sunset < 24.0);
+        // Sunrise should be early (around 9-10 UTC for summer solstice in NYC)
+        assert!(sunrise > 8.0 && sunrise < 12.0, "sunrise was {sunrise}");
+        // Sunset should be late (around 0-2 UTC next day, or 24-26)
+        assert!(sunset > 20.0 && sunset < 28.0, "sunset was {sunset}");
     }
 }
