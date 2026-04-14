@@ -24,6 +24,21 @@ pub struct HaDevice {
     pub sw_version: Option<String>,
 }
 
+/// Origin information for MQTT discovery (required by Home Assistant 2024.1+).
+#[derive(Debug, Clone, Serialize)]
+pub struct HaOrigin {
+    /// Name of the application providing this entity
+    pub name: String,
+
+    /// Software version of the application
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sw: Option<String>,
+
+    /// Support URL for the application
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
 /// Home Assistant MQTT Discovery payload for a binary sensor.
 #[derive(Debug, Clone, Serialize)]
 pub struct HaDiscoveryPayload {
@@ -63,6 +78,10 @@ pub struct HaDiscoveryPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<HaDevice>,
 
+    /// Origin information (required by Home Assistant 2024.1+)
+    #[serde(rename = "o")]
+    pub origin: HaOrigin,
+
     /// Icon override
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -97,6 +116,11 @@ impl HaDiscoveryPayload {
                 model: Some("PIR Motion Sensor".to_string()),
                 sw_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
+            origin: HaOrigin {
+                name: "mrpir".to_string(),
+                sw: Some(env!("CARGO_PKG_VERSION").to_string()),
+                url: Some("https://github.com/MichaelRegan/rust-mrpir".to_string()),
+            },
             icon: Some("mdi:motion-sensor".to_string()),
         }
     }
@@ -131,10 +155,13 @@ mod tests {
             payload.state_topic,
             "homeassistant/binary_sensor/bedroom/state"
         );
+        assert_eq!(payload.origin.name, "mrpir");
 
         let json = payload.to_json().unwrap();
         assert!(json.contains("motion"));
         assert!(json.contains("bedroom"));
+        // Verify origin is serialized with abbreviated key "o"
+        assert!(json.contains(r#""o":"#));
     }
 
     #[test]
