@@ -3,4 +3,6 @@
 mod client;
 mod discovery;
 
-pub use client::{MqttClient, MqttEvent};
+#[cfg(test)]
+pub use client::MqttPublishFuture;
+pub use client::{MqttClient, MqttEvent, MqttPublisher};

@@ -1,8 +1,8 @@
 //! PIR sensor module using rppal GPIO.
 
 use rppal::gpio::{Gpio, InputPin, Level};
-use std::time::Duration;
-use tokio::sync::mpsc;
+use std::time::{Duration, Instant};
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -10,11 +10,11 @@ use crate::config::SensorConfig;
 use crate::error::SensorError;
 
 /// Motion events from the PIR sensor.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MotionEvent {
     /// Motion was detected
     Detected,
-    /// Motion stopped (after no_motion_delay)
+    /// Motion stopped (after `no_motion_delay`)
     Cleared,
 }
 
@@ -58,55 +58,71 @@ impl PirSensor {
         &self,
         tx: mpsc::Sender<MotionEvent>,
         shutdown: CancellationToken,
+        health_tx: watch::Sender<Instant>,
+        initial_state: bool,
     ) {
         let poll_interval = Duration::from_millis(self.config.poll_interval_ms);
         let no_motion_delay = Duration::from_secs(self.config.no_motion_delay_secs);
 
-        let mut last_state = false;
-        let mut motion_active = false;
-        let mut last_motion_time = std::time::Instant::now();
+        let mut last_state = initial_state;
+        let mut motion_active = initial_state;
+        let mut low_since: Option<Instant> = None;
 
         info!(
             poll_interval_ms = self.config.poll_interval_ms,
             no_motion_delay_secs = self.config.no_motion_delay_secs,
+            initial_gpio_active = initial_state,
             "Starting PIR sensor polling"
         );
 
         loop {
             tokio::select! {
-                _ = shutdown.cancelled() => {
+                () = shutdown.cancelled() => {
                     info!("PIR sensor shutting down");
                     break;
                 }
-                _ = tokio::time::sleep(poll_interval) => {
+                () = tokio::time::sleep(poll_interval) => {
+                    let now = Instant::now();
                     let current_state = self.read();
+                    if health_tx.send(now).is_err() {
+                        debug!("PIR health receiver dropped");
+                    }
 
-                    // Rising edge: motion just detected
-                    if current_state && !last_state {
-                        debug!("PIR sensor: rising edge detected");
-                        last_motion_time = std::time::Instant::now();
+                    if current_state {
+                        if !last_state {
+                            debug!("PIR sensor: rising edge detected");
+                        }
+
+                        if low_since.take().is_some() {
+                            info!("No-motion timer cancelled");
+                        }
 
                         if !motion_active {
                             motion_active = true;
-                            if let Err(e) = tx.send(MotionEvent::Detected).await {
-                                warn!("Failed to send motion event: {}", e);
+                            info!("PIR motion detected");
+                            if !send_motion_event(&tx, MotionEvent::Detected).await {
+                                break;
                             }
                         }
-                    }
+                    } else if motion_active {
+                        if last_state && low_since.is_none() {
+                            low_since = Some(now);
+                            info!(
+                                no_motion_delay_secs = self.config.no_motion_delay_secs,
+                                "No-motion timer started"
+                            );
+                        }
 
-                    // Update motion time while motion is active
-                    if current_state {
-                        last_motion_time = std::time::Instant::now();
-                    }
-
-                    // Check for motion timeout
-                    if motion_active && !current_state {
-                        let elapsed = last_motion_time.elapsed();
-                        if elapsed >= no_motion_delay {
-                            debug!("PIR sensor: motion cleared after {:?}", elapsed);
-                            motion_active = false;
-                            if let Err(e) = tx.send(MotionEvent::Cleared).await {
-                                warn!("Failed to send motion cleared event: {}", e);
+                        if let Some(started_at) = low_since {
+                            let elapsed = now.duration_since(started_at);
+                            if elapsed >= no_motion_delay {
+                                let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+                                info!(elapsed_ms, "No-motion timer fired");
+                                motion_active = false;
+                                low_since = None;
+                                if !send_motion_event(&tx, MotionEvent::Cleared).await {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -114,6 +130,16 @@ impl PirSensor {
                     last_state = current_state;
                 }
             }
+        }
+    }
+}
+
+async fn send_motion_event(tx: &mpsc::Sender<MotionEvent>, event: MotionEvent) -> bool {
+    match tx.send(event).await {
+        Ok(()) => true,
+        Err(e) => {
+            warn!(event = ?e.0, error = %e, "Failed to send motion event");
+            false
         }
     }
 }

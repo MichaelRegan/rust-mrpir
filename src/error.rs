@@ -15,6 +15,9 @@ pub enum MqttError {
     #[error("failed to publish message: {0}")]
     PublishFailed(#[from] rumqttc::ClientError),
 
+    #[error("timed out queueing MQTT publish to {topic} after {timeout_secs}s")]
+    PublishTimedOut { topic: String, timeout_secs: u64 },
+
     #[error("invalid MQTT configuration: {0}")]
     InvalidConfig(String),
 }
