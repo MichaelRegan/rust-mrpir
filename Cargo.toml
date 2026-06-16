@@ -2,7 +2,7 @@
 name = "mrpir"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.96"
 authors = ["Michael Regan"]
 description = "Motion-activated screen control for Raspberry Pi with MQTT/Home Assistant integration"
 license = "MIT"
@@ -15,8 +15,8 @@ categories = ["hardware-support", "embedded"]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "fs"] }
 tokio-util = "0.7"
 
-# MQTT (pure Rust, async-native)
-rumqttc = "0.24"
+# MQTT (async-native; TLS transport is not currently configured by mrpir)
+rumqttc = { version = "0.25", default-features = false }
 
 # GPIO for Raspberry Pi
 rppal = "0.22"
@@ -35,10 +35,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Systemd integration
-sd-notify = "0.4"
+sd-notify = "0.5"
 
 # Screen brightness control (sysfs-based, default)
-brightness = { version = "0.5", optional = true }
+brightness = { version = "0.8", optional = true }
 futures-util = { version = "0.3", optional = true }
 
 # Wayland screen control (optional)
@@ -59,7 +59,7 @@ wayland-control = ["wayland-client", "wayland-protocols-wlr"]
 
 [dev-dependencies]
 tempfile = "3"
-toml = "0.8"
+toml = "1.1"
 serde_json = "1"
 flume = "0.11"
 

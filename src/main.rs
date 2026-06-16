@@ -210,15 +210,19 @@ async fn main() -> Result<()> {
     }
 
     // Notify systemd we're ready
-    let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
 
     // Get watchdog interval if running under systemd
     // Check WATCHDOG_USEC env var directly as fallback for user services
     let watchdog_interval = {
-        let mut usec = 0u64;
-        if sd_notify::watchdog_enabled(false, &mut usec) && usec > 0 {
-            info!(interval_ms = usec / 2000, "Systemd watchdog enabled");
-            Some(std::time::Duration::from_micros(usec) / 2)
+        if let Some(duration) = sd_notify::watchdog_enabled().filter(|duration| !duration.is_zero())
+        {
+            let interval = duration / 2;
+            info!(
+                interval_ms = interval.as_millis(),
+                "Systemd watchdog enabled"
+            );
+            Some(interval)
         } else if let Ok(usec_str) = std::env::var("WATCHDOG_USEC") {
             if let Ok(usec) = usec_str.parse::<u64>() {
                 info!(
@@ -276,7 +280,7 @@ async fn main() -> Result<()> {
                         error!(error = %error, "Health failure; terminating for systemd restart");
                         shutdown_token.cancel();
                         app.shutdown().await;
-                        let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+                        let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
                         return Err(error);
                     }
                 }
@@ -306,7 +310,7 @@ async fn main() -> Result<()> {
                         error!(error = %error, "Health failure; terminating for systemd restart");
                         shutdown_token.cancel();
                         app.shutdown().await;
-                        let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+                        let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
                         return Err(error);
                     }
                 }
@@ -331,7 +335,7 @@ async fn main() -> Result<()> {
                     error!(error = %e, "Health failure; terminating for systemd restart");
                     shutdown_token.cancel();
                     app.shutdown().await;
-                    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+                    let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
                     return Err(e);
                 }
             }
@@ -344,7 +348,7 @@ async fn main() -> Result<()> {
                     future::pending::<()>().await;
                 }
             } => {
-                let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]);
+                let _ = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]);
             }
         }
     }
@@ -359,7 +363,7 @@ async fn main() -> Result<()> {
     app.shutdown().await;
 
     // Notify systemd we're stopping
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
 
     info!("Goodbye!");
     Ok(())
